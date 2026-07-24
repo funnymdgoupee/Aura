@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ConnectionMode = "lan" | "relay";
+type View = "welcome" | "chat" | "settings";
 
 interface AppConfig {
   ai_base_url: string;
@@ -19,19 +22,18 @@ interface ProviderPreset {
   label: string;
   base_url: string;
   model: string;
-  doc_url?: string;
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { label: "DeepSeek", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   { label: "OpenAI", base_url: "https://api.openai.com/v1", model: "gpt-4o" },
-  { label: "Claude (兼容代理)", base_url: "https://api.anthropic.com/v1/openai", model: "claude-sonnet-4-6" },
+  { label: "Claude", base_url: "https://api.anthropic.com/v1/openai", model: "claude-sonnet-4-6" },
   { label: "Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash" },
   { label: "智谱 GLM", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6" },
   { label: "通义 Qwen", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3-coder-plus" },
   { label: "Kimi", base_url: "https://api.moonshot.cn/v1", model: "kimi-k2" },
   { label: "豆包", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-1-5-pro" },
-  { label: "Ollama (本地)", base_url: "http://localhost:11434/v1", model: "qwen2.5" },
+  { label: "Ollama", base_url: "http://localhost:11434/v1", model: "qwen2.5" },
 ];
 
 interface StatusResponse {
@@ -81,12 +83,30 @@ interface AiErrorEvent {
   timestamp: number;
 }
 
+interface SessionInfo {
+  id: string;
+  title: string;
+  preview: string;
+  time: string;
+}
+
+const QUICK_CARDS = [
+  { icon: "✦", title: "写作助手", desc: "邮件、文档、文案润色", prompt: "帮我写一封简洁的商务邮件，主题是关于项目进度同步" },
+  { icon: "◈", title: "代码助手", desc: "调试、重构、解释代码", prompt: "解释一下 Rust 的所有权系统" },
+  { icon: "◉", title: "知识问答", desc: "概念解释、对比分析", prompt: "对比一下局域网和中继服务器的优缺点" },
+];
+
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [qr, setQr] = useState<PairingResult | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [view, setView] = useState<View>("welcome");
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [activeSession, setActiveSession] = useState<string>("mac-local");
+  const [sessionSearch, setSessionSearch] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -106,14 +126,29 @@ export default function App() {
     }
   }, []);
 
+  const refreshSessions = useCallback(async () => {
+    try {
+      const ids = await invoke<string[]>("list_sessions");
+      const infos: SessionInfo[] = ids.map((id) => ({
+        id,
+        title: id === "mac-local" ? "Mac 本地会话" : id,
+        preview: "点击进入会话",
+        time: "—",
+      }));
+      setSessions(infos);
+    } catch {
+      setSessions([]);
+    }
+  }, []);
+
   useEffect(() => {
     refreshConfig();
     refreshStatus();
+    refreshSessions();
     const timer = setInterval(refreshStatus, 3000);
     return () => clearInterval(timer);
-  }, [refreshConfig, refreshStatus]);
+  }, [refreshConfig, refreshStatus, refreshSessions]);
 
-  // 监听 router 发来的 AI 消息 / 状态 / 错误
   useEffect(() => {
     let unlistenMsg: UnlistenFn | undefined;
     let unlistenStatus: UnlistenFn | undefined;
@@ -122,7 +157,6 @@ export default function App() {
     listen<AiMessageEvent>("ai_message", (e) => {
       const p = e.payload.payload;
       setMessages((m) => {
-        // 移除最后一个 thinking 占位
         const withoutThinking = m.filter((_, idx) =>
           !(m[idx].thinking && idx === m.length - 1)
         );
@@ -141,7 +175,6 @@ export default function App() {
     listen<AiStatusEvent>("ai_status", (e) => {
       if (e.payload.status === "thinking") {
         setMessages((m) => {
-          // 已有 thinking 占位就不重复加
           if (m.length > 0 && m[m.length - 1].thinking) return m;
           return [...m, { role: "ai", text: "", thinking: true }];
         });
@@ -161,6 +194,10 @@ export default function App() {
       unlistenErr?.();
     };
   }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleStart = async () => {
     try {
@@ -209,14 +246,14 @@ export default function App() {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
-    const text = input;
-    setMessages((m) => [...m, { role: "user", text }]);
+  const handleSend = async (text?: string) => {
+    const content = (text ?? input).trim();
+    if (!content) return;
+    setMessages((m) => [...m, { role: "user", text: content }]);
     setInput("");
+    setView("chat");
     try {
-      await invoke("send_message", { text, sessionId: null });
-      // 响应通过 ai_message / ai_status / ai_error 事件回传
+      await invoke("send_message", { text: content, sessionId: activeSession });
     } catch (e) {
       setMessages((m) => [
         ...m,
@@ -225,208 +262,389 @@ export default function App() {
     }
   };
 
+  const handleNewSession = () => {
+    const id = `s-${Date.now()}`;
+    setActiveSession(id);
+    setMessages([]);
+    setView("chat");
+    refreshSessions();
+  };
+
+  const handleClearSession = async (id: string) => {
+    try {
+      await invoke("clear_session", { sessionId: id });
+      if (id === activeSession) setMessages([]);
+      refreshSessions();
+    } catch (e) {
+      alert("清空失败: " + e);
+    }
+  };
+
   if (!config) {
-    return <div className="app"><div className="header"><h1>加载中...</h1></div></div>;
+    return (
+      <>
+        <div className="ambient-glow">
+          <div className="glow-orb glow-orb-1" />
+          <div className="glow-orb glow-orb-2" />
+          <div className="glow-orb glow-orb-3" />
+        </div>
+        <div className="grid-texture" />
+        <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>
+          加载中...
+        </div>
+      </>
+    );
   }
 
   const running = status?.status === "listening" || status?.status === "connected";
+  const statusClass = running ? "online" : status?.status === "error" ? "offline" : "offline";
+  const statusText = status ? `${status.mode} · ${status.status}` : "未启动";
+
+  const filteredSessions = sessions.filter((s) =>
+    s.title.toLowerCase().includes(sessionSearch.toLowerCase())
+  );
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>Aura Assistant</h1>
-        <span className={`status ${running ? "running" : ""} ${status?.status === "error" ? "error" : ""}`}>
-          {status ? `${status.mode} · ${status.status}` : "—"}
-        </span>
-        {running ? (
-          <button className="btn danger" onClick={handleStop}>停止</button>
-        ) : (
-          <button className="btn" onClick={handleStart}>启动服务</button>
-        )}
-        <button className="btn secondary" onClick={handleGenerateQr}>配对二维码</button>
-      </header>
+    <>
+      <div className="ambient-glow">
+        <div className="glow-orb glow-orb-1" />
+        <div className="glow-orb glow-orb-2" />
+        <div className="glow-orb glow-orb-3" />
+      </div>
+      <div className="grid-texture" />
 
-      <div className="main">
+      <div className={`app-shell${view === "welcome" ? " no-panel" : ""}`}>
+        {/* ============ Sidebar ============ */}
         <aside className="sidebar">
-          <h2 className="section-title">连接模式</h2>
-          <div className="field">
-            <select
-              value={config.connection_mode}
-              onChange={(e) => handleSwitchMode(e.target.value as ConnectionMode)}
-            >
-              <option value="lan">局域网（Mac 作为服务器）</option>
-              <option value="relay">自定义服务器（中继，Phase 4）</option>
-            </select>
+          <div className="brand">
+            <div className="brand-logo">A</div>
+            <div className="brand-name">Aura</div>
           </div>
 
-          {config.connection_mode === "lan" ? (
-            <div className="field">
-              <label>监听端口</label>
-              <input
-                type="number"
-                value={config.server_port}
-                onChange={(e) =>
-                  setConfig({ ...config, server_port: parseInt(e.target.value) || 8765 })
-                }
-              />
-            </div>
-          ) : (
-            <>
-              <div className="field">
-                <label>中继服务器地址</label>
-                <input
-                  type="text"
-                  placeholder="wss://your-vps.com/relay"
-                  value={config.relay_server_url}
-                  onChange={(e) =>
-                    setConfig({ ...config, relay_server_url: e.target.value })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Room ID（自动生成）</label>
-                <input
-                  type="text"
-                  value={config.relay_room_id}
-                  onChange={(e) =>
-                    setConfig({ ...config, relay_room_id: e.target.value })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Secret Key</label>
-                <input
-                  type="password"
-                  value={config.relay_secret_key}
-                  onChange={(e) =>
-                    setConfig({ ...config, relay_secret_key: e.target.value })
-                  }
-                />
-              </div>
-              <p style={{ fontSize: 11, color: "#8e8e93", marginTop: 0 }}>
-                中继模式 Phase 4 实现，当前仅作配置占位。
-              </p>
-            </>
-          )}
-
-          <h2 className="section-title" style={{ marginTop: 20 }}>AI 服务配置</h2>
-          <p style={{ fontSize: 11, color: "#8e8e93", marginTop: 0 }}>
-            兼容 OpenAI 协议的任意服务 — 下方有常用 provider 快捷填入
-          </p>
-
-          <div className="field">
-            <label>Base URL</label>
-            <input
-              type="text"
-              placeholder="https://api.deepseek.com/v1"
-              value={config.ai_base_url}
-              onChange={(e) =>
-                setConfig({ ...config, ai_base_url: e.target.value })
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label>API Key</label>
-            <input
-              type="password"
-              placeholder="sk-xxx"
-              value={config.ai_api_key}
-              onChange={(e) =>
-                setConfig({ ...config, ai_api_key: e.target.value })
-              }
-            />
-          </div>
-
-          <div className="field">
-            <label>Model</label>
-            <input
-              type="text"
-              placeholder="deepseek-chat / gpt-4o / glm-4.6 / ..."
-              value={config.ai_model}
-              onChange={(e) =>
-                setConfig({ ...config, ai_model: e.target.value })
-              }
-            />
-          </div>
-
-          <details style={{ marginBottom: 14 }}>
-            <summary style={{ fontSize: 11, color: "#8e8e93", cursor: "pointer" }}>
-              快捷填入常用 Provider
-            </summary>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
-              {PROVIDER_PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  className="btn secondary"
-                  style={{ fontSize: 11, padding: "6px 8px" }}
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      ai_base_url: p.base_url,
-                      ai_model: p.model,
-                    })
-                  }
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </details>
-
-          <button className="btn secondary" onClick={handleSaveConfig} style={{ width: "100%" }}>
-            保存配置
+          <div className="nav-section-title">主功能</div>
+          <button
+            className={`nav-item${view === "welcome" ? " active" : ""}`}
+            onClick={() => setView("welcome")}
+          >
+            <span className="nav-icon">⌂</span>
+            首页
+          </button>
+          <button
+            className={`nav-item${view === "chat" ? " active" : ""}`}
+            onClick={() => setView("chat")}
+          >
+            <span className="nav-icon">💬</span>
+            聊天
+          </button>
+          <button
+            className={`nav-item${view === "settings" ? " active" : ""}`}
+            onClick={() => setView("settings")}
+          >
+            <span className="nav-icon">⚙</span>
+            设置
           </button>
 
-          {qr && (
-            <>
-              <h2 className="section-title" style={{ marginTop: 20 }}>配对二维码</h2>
-              <img src={qr.qr_data_url} alt="pairing qr" className="qr-preview" />
-              <p style={{ fontSize: 11, color: "#8e8e93", wordBreak: "break-all" }}>
-                {qr.raw_url}
-              </p>
-            </>
-          )}
+          <div className="nav-section-title">连接</div>
+          <button className="nav-item" onClick={handleGenerateQr}>
+            <span className="nav-icon">▦</span>
+            配对二维码
+          </button>
+          <button className="nav-item" onClick={running ? handleStop : handleStart}>
+            <span className="nav-icon">⏻</span>
+            {running ? "停止服务" : "启动服务"}
+          </button>
+
+          <div className="sidebar-spacer" />
+
+          <div className="user-card">
+            <div className="user-avatar">U</div>
+            <div className="user-info">
+              <div className="user-name">本地用户</div>
+              <div className="user-meta">{running ? "在线" : "离线"}</div>
+            </div>
+          </div>
         </aside>
 
-        <main className="chat">
-          {messages.length === 0 && (
-            <div style={{ color: "#8e8e93", fontSize: 13, textAlign: "center", marginTop: 40 }}>
-              启动服务后，在下方输入消息，AI 回复会实时显示在这里，同时广播给已连接的设备。
+        {/* ============ Main ============ */}
+        <main className="main">
+          <div className="topbar">
+            <div className="topbar-left">
+              <span className={`status-dot ${statusClass}`} />
+              <span>{statusText}</span>
             </div>
-          )}
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              className={`msg ${m.role === "user" ? "user" : m.role === "system" ? "system" : "ai"}${m.error ? " error" : ""}`}
-            >
-              {m.thinking ? (
-                <em style={{ opacity: 0.6 }}>思考中...</em>
+            <div className="topbar-right">
+              {running ? (
+                <button className="btn btn-secondary" onClick={handleStop}>停止</button>
               ) : (
-                <>
-                  {m.summary && (
-                    <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
-                      {m.summary}
-                    </div>
-                  )}
-                  {m.text}
-                </>
+                <button className="btn btn-primary" onClick={handleStart}>启动服务</button>
               )}
             </div>
-          ))}
-        </main>
-      </div>
+          </div>
 
-      <div className="composer">
-        <input
-          type="text"
-          placeholder="输入消息，回车发送给 AI"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-        />
-        <button className="btn" onClick={handleSend}>发送</button>
+          <div className="content">
+            {view === "welcome" && (
+              <div className="welcome">
+                <div className="welcome-icon">✦</div>
+                <h1 className="welcome-title">你好，我是 Aura</h1>
+                <p className="welcome-subtitle">
+                  你的私人 AI 助手。启动服务后即可在 Mac、iPhone、Apple Watch 之间同步对话。
+                </p>
+                <div className="quick-cards">
+                  {QUICK_CARDS.map((c) => (
+                    <button
+                      key={c.title}
+                      className="quick-card"
+                      onClick={() => handleSend(c.prompt)}
+                    >
+                      <div className="quick-card-icon">{c.icon}</div>
+                      <div className="quick-card-title">{c.title}</div>
+                      <div className="quick-card-desc">{c.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {view === "chat" && (
+              <div className="chat">
+                <div className="chat-messages">
+                  {messages.length === 0 && (
+                    <div className="chat-empty">
+                      输入消息开始对话，AI 回复会同步到所有已配对设备。
+                    </div>
+                  )}
+                  {messages.map((m, i) => {
+                    if (m.thinking) {
+                      return <div key={i} className="msg thinking" />;
+                    }
+                    const cls = `msg ${m.role === "user" ? "user" : m.role === "system" ? "system" : "ai"}${m.error ? " error" : ""}`;
+                    return (
+                      <div key={i} className={cls}>
+                        {m.role === "ai" && m.summary && (
+                          <div className="msg-summary">{m.summary}</div>
+                        )}
+                        <div className="msg-content">
+                          {m.role === "ai" ? (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {m.text}
+                            </ReactMarkdown>
+                          ) : (
+                            m.text
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <div className="composer">
+                  <div className="composer-input-wrap">
+                    <textarea
+                      className="composer-input"
+                      placeholder="输入消息，回车发送，Shift+Enter 换行"
+                      value={input}
+                      rows={1}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                    />
+                    <div className="composer-actions">
+                      <button className="icon-btn" title="附件（Phase 2）">📎</button>
+                      <button
+                        className="send-btn"
+                        onClick={() => handleSend()}
+                        disabled={!input.trim()}
+                        title="发送"
+                      >↑</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {view === "settings" && (
+              <div className="settings">
+                <h1 className="settings-title">设置</h1>
+                <p className="settings-subtitle">
+                  配置 AI 服务、连接模式与设备配对。
+                </p>
+
+                <div className="settings-section">
+                  <h3 className="settings-section-title">AI 服务</h3>
+                  <div className="field">
+                    <label className="field-label">Base URL</label>
+                    <input
+                      className="field-input"
+                      placeholder="https://api.deepseek.com/v1"
+                      value={config.ai_base_url}
+                      onChange={(e) => setConfig({ ...config, ai_base_url: e.target.value })}
+                    />
+                    <span className="field-hint">兼容 OpenAI 协议的任意服务</span>
+                  </div>
+                  <div className="field">
+                    <label className="field-label">API Key</label>
+                    <input
+                      className="field-input"
+                      type="password"
+                      placeholder="sk-xxx"
+                      value={config.ai_api_key}
+                      onChange={(e) => setConfig({ ...config, ai_api_key: e.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="field-label">Model</label>
+                    <input
+                      className="field-input"
+                      placeholder="deepseek-chat / gpt-4o / glm-4.6"
+                      value={config.ai_model}
+                      onChange={(e) => setConfig({ ...config, ai_model: e.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="field-label">快捷 Provider</label>
+                    <div className="preset-grid">
+                      {PROVIDER_PRESETS.map((p) => (
+                        <button
+                          key={p.label}
+                          className="preset-btn"
+                          onClick={() => setConfig({
+                            ...config,
+                            ai_base_url: p.base_url,
+                            ai_model: p.model,
+                          })}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-section">
+                  <h3 className="settings-section-title">连接模式</h3>
+                  <div className="field">
+                    <label className="field-label">模式</label>
+                    <select
+                      className="field-select"
+                      value={config.connection_mode}
+                      onChange={(e) => handleSwitchMode(e.target.value as ConnectionMode)}
+                    >
+                      <option value="lan">局域网（Mac 作为服务器）</option>
+                      <option value="relay">自定义服务器（中继，Phase 4）</option>
+                    </select>
+                  </div>
+                  {config.connection_mode === "lan" ? (
+                    <div className="field">
+                      <label className="field-label">监听端口</label>
+                      <input
+                        className="field-input"
+                        type="number"
+                        value={config.server_port}
+                        onChange={(e) =>
+                          setConfig({ ...config, server_port: parseInt(e.target.value) || 8765 })
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="field">
+                        <label className="field-label">中继服务器地址</label>
+                        <input
+                          className="field-input"
+                          placeholder="wss://your-vps.com/relay"
+                          value={config.relay_server_url}
+                          onChange={(e) => setConfig({ ...config, relay_server_url: e.target.value })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Room ID</label>
+                        <input
+                          className="field-input"
+                          value={config.relay_room_id}
+                          onChange={(e) => setConfig({ ...config, relay_room_id: e.target.value })}
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Secret Key</label>
+                        <input
+                          className="field-input"
+                          type="password"
+                          value={config.relay_secret_key}
+                          onChange={(e) => setConfig({ ...config, relay_secret_key: e.target.value })}
+                        />
+                        <span className="field-hint">中继模式 Phase 4 实现，当前仅作配置占位</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="settings-section">
+                  <h3 className="settings-section-title">配对二维码</h3>
+                  <button className="btn btn-secondary" onClick={handleGenerateQr}>
+                    生成二维码
+                  </button>
+                  {qr && (
+                    <>
+                      <img src={qr.qr_data_url} alt="pairing qr" className="qr-preview" />
+                      <div className="qr-url">{qr.raw_url}</div>
+                    </>
+                  )}
+                </div>
+
+                <div className="btn-row">
+                  <button className="btn btn-primary" onClick={handleSaveConfig}>保存配置</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* ============ Right Panel ============ */}
+        {view !== "welcome" && (
+          <aside className="panel">
+            <div className="panel-header">
+              <h3 className="panel-title">历史会话</h3>
+              <button className="icon-btn" title="刷新" onClick={refreshSessions}>↻</button>
+            </div>
+            <input
+              className="search-input"
+              placeholder="搜索会话..."
+              value={sessionSearch}
+              onChange={(e) => setSessionSearch(e.target.value)}
+            />
+            <div className="session-list">
+              {filteredSessions.length === 0 && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "20px 0" }}>
+                  暂无会话
+                </div>
+              )}
+              {filteredSessions.map((s) => (
+                <div
+                  key={s.id}
+                  className={`session-item${s.id === activeSession ? " active" : ""}`}
+                  onClick={() => {
+                    setActiveSession(s.id);
+                    setMessages([]);
+                    setView("chat");
+                  }}
+                >
+                  <div className="session-item-title">{s.title}</div>
+                  <div className="session-item-desc">{s.preview}</div>
+                  <div className="session-item-time">{s.time}</div>
+                </div>
+              ))}
+            </div>
+            <button className="new-session-btn" onClick={handleNewSession}>
+              + 新建会话
+            </button>
+          </aside>
+        )}
       </div>
-    </div>
+    </>
   );
 }
