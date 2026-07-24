@@ -9,6 +9,7 @@ pub mod server;
 pub mod session;
 pub mod tray;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -28,7 +29,7 @@ pub struct AppState {
     pub sessions: SessionStore,
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point))]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_secs()
@@ -63,7 +64,7 @@ pub fn run() {
                     config: Arc::new(Mutex::new(config)),
                     transport: Arc::new(Mutex::new(None)),
                     local_tx: Arc::new(Mutex::new(None)),
-                    sessions: SessionStore::new(),
+                    sessions: SessionStore::new(resolve_sessions_dir(&handle, &config).await),
                 };
                 let _ = handle.manage(state);
                 let _ = handle.manage(db);
@@ -85,7 +86,23 @@ pub fn run() {
             commands::send_message,
             commands::list_sessions,
             commands::clear_session,
+            commands::pick_storage_folder,
+            commands::set_storage_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 解析会话存储目录：用户配置优先，否则用 app_data_dir/sessions/
+async fn resolve_sessions_dir(handle: &tauri::AppHandle, config: &AppConfig) -> PathBuf {
+    if let Some(custom) = &config.storage_dir {
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
+    let base = handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    base.join("sessions")
 }

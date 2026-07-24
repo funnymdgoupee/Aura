@@ -22,6 +22,10 @@ pub struct AppConfig {
     pub relay_server_url: String,
     pub relay_room_id: String,
     pub relay_secret_key: String,
+    /// 聊天历史 Markdown 文件存放目录
+    /// None = 默认 `<app_data_dir>/sessions/`
+    /// Some(path) = 用户自选目录（iCloud / Dropbox / 外置盘等）
+    pub storage_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +46,7 @@ impl Default for AppConfig {
             relay_server_url: String::new(),
             relay_room_id: String::new(),
             relay_secret_key: String::new(),
+            storage_dir: None,
         }
     }
 }
@@ -70,6 +75,7 @@ impl AppConfig {
                     "relay_server_url" => cfg.relay_server_url = v,
                     "relay_room_id" => cfg.relay_room_id = v,
                     "relay_secret_key" => cfg.relay_secret_key = v,
+                    "storage_dir" => cfg.storage_dir = if v.is_empty() { None } else { Some(v) },
                     _ => {}
                 }
             }
@@ -96,6 +102,7 @@ impl AppConfig {
         db.upsert_config("relay_server_url", &self.relay_server_url).await?;
         db.upsert_config("relay_room_id", &self.relay_room_id).await?;
         db.upsert_config("relay_secret_key", &self.relay_secret_key).await?;
+        db.upsert_config("storage_dir", self.storage_dir.as_deref().unwrap_or("")).await?;
         Ok(())
     }
 }

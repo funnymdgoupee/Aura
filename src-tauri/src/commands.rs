@@ -1,7 +1,10 @@
 //! Tauri 命令层 — 暴露给前端的 Rust 函数
 
+use std::path::PathBuf;
+
 use serde::Serialize;
 use tauri::{AppHandle, State};
+use tauri_plugin_dialog::{DialogExt, FilePath};
 
 use crate::config::{AppConfig, ConnectionMode};
 use crate::network::lan::LanTransport;
@@ -9,6 +12,7 @@ use crate::network::relay::RelayTransport;
 use crate::network::{TransportHandle, TransportStatus};
 use crate::pairing;
 use crate::protocol::{timestamp_now, ClientPayload, ClientToServer, DeviceType};
+use crate::session::SessionMeta;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -230,7 +234,7 @@ pub async fn send_message(
 }
 
 #[tauri::command]
-pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionMeta>, String> {
     Ok(state.sessions.list_sessions().await)
 }
 
@@ -240,5 +244,41 @@ pub async fn clear_session(
     session_id: String,
 ) -> Result<(), String> {
     state.sessions.clear(&session_id).await;
+    Ok(())
+}
+
+/// 弹出文件夹选择对话框 — 返回所选路径（取消则 None）
+#[tauri::command]
+pub async fn pick_storage_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择 Aura 会话存储位置")
+        .pick_folder(move |result| {
+            let _ = tx.send(match result {
+                Ok(Some(FilePath::Path(p))) => Some(p.to_string_lossy().to_string()),
+                _ => None,
+            });
+        });
+    let result = rx.await.map_err(|_| "对话框错误".to_string())?;
+    Ok(result)
+}
+
+/// 用户在设置里改了存储位置后，前端调此命令切换 SessionStore 的 base_dir
+#[tauri::command]
+pub async fn set_storage_dir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    dir: Option<String>,
+) -> Result<(), String> {
+    let path = match dir {
+        Some(d) if !d.is_empty() => PathBuf::from(d),
+        _ => app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("sessions"),
+    };
+    state.sessions.set_base_dir(path).await;
     Ok(())
 }

@@ -16,6 +16,7 @@ interface AppConfig {
   relay_server_url: string;
   relay_room_id: string;
   relay_secret_key: string;
+  storage_dir: string | null;
 }
 
 interface ProviderPreset {
@@ -87,7 +88,8 @@ interface SessionInfo {
   id: string;
   title: string;
   preview: string;
-  time: string;
+  updated_at: string;
+  message_count: number;
 }
 
 const QUICK_CARDS = [
@@ -95,6 +97,20 @@ const QUICK_CARDS = [
   { icon: "◈", title: "代码助手", desc: "调试、重构、解释代码", prompt: "解释一下 Rust 的所有权系统" },
   { icon: "◉", title: "知识问答", desc: "概念解释、对比分析", prompt: "对比一下局域网和中继服务器的优缺点" },
 ];
+
+function formatUpdated(rfc3339: string): string {
+  if (!rfc3339) return "—";
+  const d = new Date(rfc3339);
+  if (isNaN(d.getTime())) return rfc3339;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return `${hh}:${mm}`;
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${mo}-${da}`;
+}
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -128,14 +144,8 @@ export default function App() {
 
   const refreshSessions = useCallback(async () => {
     try {
-      const ids = await invoke<string[]>("list_sessions");
-      const infos: SessionInfo[] = ids.map((id) => ({
-        id,
-        title: id === "mac-local" ? "Mac 本地会话" : id,
-        preview: "点击进入会话",
-        time: "—",
-      }));
-      setSessions(infos);
+      const metas = await invoke<SessionInfo[]>("list_sessions");
+      setSessions(metas);
     } catch {
       setSessions([]);
     }
@@ -267,6 +277,30 @@ export default function App() {
     setActiveSession(id);
     setMessages([]);
     setView("chat");
+    refreshSessions();
+  };
+
+  const handlePickStorageDir = async () => {
+    try {
+      const picked = await invoke<string | null>("pick_storage_folder");
+      if (!picked) return;
+      if (!config) return;
+      const updated = { ...config, storage_dir: picked };
+      setConfig(updated);
+      await invoke("save_config", { config: updated });
+      await invoke("set_storage_dir", { dir: picked });
+      refreshSessions();
+    } catch (e) {
+      alert("选择失败: " + e);
+    }
+  };
+
+  const handleResetStorageDir = async () => {
+    if (!config) return;
+    const updated = { ...config, storage_dir: null };
+    setConfig(updated);
+    await invoke("save_config", { config: updated });
+    await invoke("set_storage_dir", { dir: null });
     refreshSessions();
   };
 
@@ -596,6 +630,33 @@ export default function App() {
                   )}
                 </div>
 
+                <div className="settings-section">
+                  <h3 className="settings-section-title">存储位置</h3>
+                  <div className="field">
+                    <label className="field-label">会话历史目录</label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        className="field-input"
+                        style={{ flex: 1 }}
+                        readOnly
+                        placeholder="（默认：~/Library/Application Support/com.aura.app/sessions/）"
+                        value={config.storage_dir ?? ""}
+                      />
+                      <button className="btn btn-secondary" onClick={handlePickStorageDir}>
+                        选择文件夹
+                      </button>
+                      {config.storage_dir && (
+                        <button className="btn btn-ghost" onClick={handleResetStorageDir}>
+                          重置
+                        </button>
+                      )}
+                    </div>
+                    <span className="field-hint">
+                      每个会话保存为一个 .md 文件，可直接用编辑器打开。可指向 iCloud Drive / Dropbox 做跨设备备份。
+                    </span>
+                  </div>
+                </div>
+
                 <div className="btn-row">
                   <button className="btn btn-primary" onClick={handleSaveConfig}>保存配置</button>
                 </div>
@@ -635,7 +696,9 @@ export default function App() {
                 >
                   <div className="session-item-title">{s.title}</div>
                   <div className="session-item-desc">{s.preview}</div>
-                  <div className="session-item-time">{s.time}</div>
+                  <div className="session-item-time">
+                    {formatUpdated(s.updated_at)} · {s.message_count} 条
+                  </div>
                 </div>
               ))}
             </div>
