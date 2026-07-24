@@ -54,7 +54,7 @@
 
 | 概念 | 定义 |
 |------|------|
-| **桌面端（服务器）** | Mac 应用，持有 DeepSeek API Key，负责 AI 调用、文件读写、命令执行；可作为局域网 WebSocket 服务器接受远程指令，或作为客户端连接用户自备的中继服务器 |
+| **桌面端（服务器）** | Mac 应用，持有用户自配置的 AI API Key（OpenAI 兼容协议），负责 AI 调用、文件读写、命令执行；可作为局域网 WebSocket 服务器接受远程指令，或作为客户端连接用户自备的中继服务器 |
 | **手机端（客户端）** | iPhone 原生 App，连接 Mac（局域网直连或通过中继服务器），收发消息、拍照上传、接收推送，同时作为手表的网络代理 |
 | **手表端（客户端）** | Apple Watch App，通过 WCSession 与 iPhone App 通信，间接控制 Mac；核心交互为语音输入 + AI 形象动画反馈 |
 | **AI 形象** | 手表端的动态视觉反馈系统，通过动画表达 AI 的"倾听"、"思考"、"回应"、"执行"等状态 |
@@ -72,7 +72,7 @@
 | **手机端 (iOS)** | **SwiftUI + Combine** | 原生开发，与 watchOS 共享大量代码，深度整合 Apple 生态 |
 | **手表端 (watchOS)** | **SwiftUI + WatchKit** | 原生开发，与 iOS App 共享数据模型和通信逻辑 |
 | **设备通信** | **WebSocket (桌面↔手机) + WCSession (手机↔手表)** | 局域网直连 + Apple 原生桥接；外网场景走用户自备中继 |
-| **AI 服务** | **DeepSeek API** | 兼容 OpenAI 接口，支持流式响应、多模态 |
+| **AI 服务** | **用户自配置 OpenAI 兼容 API** | 用户在前端填写 base_url + api_key + model，可接入 DeepSeek / OpenAI / Claude / Gemini / GLM / Qwen / Kimi / Doubao / Ollama 等任意 OpenAI 协议服务 |
 | **外网访问（预留）** | **用户自备 WebSocket 中继服务器** | 用户自有 VPS 跑极简转发服务，数据端到端加密，中继只看密文 |
 
 ### 3.2 核心依赖库
@@ -81,6 +81,7 @@
 |------|-----------|------|
 | 桌面端前端 | React / Vue 3 + Tailwind | UI 渲染 |
 | 桌面端后端 (Rust) | `tauri::api`, `tokio`, `tokio-tungstenite`, `serde`, `qrcode` | 文件系统、WebSocket 服务器/客户端、命令执行、二维码生成 |
+| 桌面端 AI 客户端 (Rust) | `reqwest` + `serde_json` + `futures-util` | 通用 OpenAI 兼容 Chat Completions 调用，支持流式 SSE |
 | 桌面端 WebSocket (服务器模式) | `tokio-tungstenite` (Rust) | 局域网模式下作为 WebSocket 服务器 |
 | 桌面端 WebSocket (中继客户端模式) | `tokio-tungstenite` + `tokio` 重连逻辑 | 自定义服务器模式下作为客户端连接用户中继 |
 | 桌面端菜单栏 | `tauri::SystemTray` | 菜单栏常驻模式 |
@@ -139,7 +140,7 @@
 │ │ │ 双重身份 + 菜单栏常驻 + 连接模式切换                              │   │   │
 │ │ │ ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐  │   │   │
 │ │ │ │ AI 客户端    │◄───┤ 消息路由器   │◄───┤ Transport 抽象层    │  │   │   │
-│ │ │ │ 调用 DeepSeek│    │ (seq 去重)  │    │ Lan / Relay 实现    │  │   │   │
+│ │ │ │ AI 调用      │    │ (seq 去重)  │    │ Lan / Relay 实现    │  │   │   │
 │ │ │ └─────────────┘    └─────────────┘    └─────────────────────┘  │   │   │
 │ │ └──────────────────────────────────────────────────────────────────┘   │   │
 │ │                                                                         │   │
@@ -188,7 +189,7 @@
 |------|------|------|
 | **UI 层** | `src-frontend/` | 聊天界面、文件拖拽、Markdown 渲染、设置面板（API Key、连接模式开关、中继服务器地址、端口） |
 | **Tauri 命令层** | `src-tauri/src/commands/` | 暴露给前端的 Rust 函数（文件读写、命令执行、二维码生成、连接模式切换等） |
-| **AI 客户端** | `src-tauri/src/ai/` | DeepSeek API 调用封装（流式/非流式），手表模式下要求输出 summary |
+| **AI 客户端** | `src-tauri/src/ai/` | 通用 OpenAI 兼容 Chat Completions 调用（流式 SSE / 非流式），手表模式下要求输出 summary |
 | **会话管理** | `src-tauri/src/session/` | 会话 CRUD、消息历史存储、上下文管理 |
 | **网络传输抽象层** | `src-tauri/src/network/` | Transport trait + LanTransport + RelayTransport 实现，屏蔽连接模式差异 |
 | **WebSocket 服务器** | `src-tauri/src/server/` | 局域网模式下监听端口、接受手机/手表连接、消息广播 |
@@ -884,7 +885,7 @@ struct WatchReplyView: View {
 
 ```
 ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-│ 手表端   │    │ iPhone  │    │  Mac    │    │DeepSeek │
+│ 手表端   │    │ iPhone  │    │  Mac    │    │ AI API  │
 │ (watch) │    │ (手机)  │    │ (桌面端)│    │  API   │
 └────┬────┘    └────┬────┘    └────┬────┘    └────┬────┘
      │              │              │              │
@@ -1064,7 +1065,9 @@ CREATE TABLE config (
     value TEXT
 );
 -- 例如:
---   ('deepseek_api_key', 'sk-xxx')
+--   ('ai_base_url', 'https://api.deepseek.com/v1')   -- OpenAI 兼容协议 base_url
+--   ('ai_api_key', 'sk-xxx')
+--   ('ai_model', 'deepseek-chat')                    -- 模型名（gpt-4o / glm-4.6 / kimi-k2 等）
 --   ('server_port', '8765')
 --   ('connection_mode', 'lan')              -- 'lan' | 'relay'
 --   ('relay_server_url', 'wss://user-vps.com/relay')
@@ -1104,7 +1107,7 @@ class CachedMessage {
 
 ### 7.2 首次使用流程
 
-1. 用户下载桌面端 App，输入 DeepSeek API Key
+1. 用户下载桌面端 App，在设置面板填入 AI 服务配置（Base URL / API Key / Model，可点选常用 Provider 快捷填入）
 2. 在设置面板选择**连接模式**：
    - **局域网（默认）**：Mac 作为 WebSocket 服务器
    - **自定义服务器（可选）**：填入自部署的中继服务器地址（`wss://your-vps.com/relay`）
@@ -1208,7 +1211,7 @@ wss.on('connection', (ws, req) => {
 |------|---------|
 | 局域网内未授权设备连接 | 首次连接需在桌面端点击"确认配对"（类似 AirDrop）；中继模式靠 room/key 自授权 |
 | WebSocket 传输明文 | 局域网模式 Phase 0-3 接受明文（局域网可信）；中继模式 Phase 4 起强制端到端加密（WSS + 业务层加密） |
-| API Key 泄露 | 仅存储在桌面端 Keychain (macOS)；手机端不接触 Key |
+| API Key 泄露 | 仅存储在桌面端 Keychain (macOS)；手机端不接触 Key；通用 OpenAI 协议意味着用户可接入任意 provider，Key 不会绑死单一服务 |
 | 多用户误连 | 每个会话生成唯一 Session ID，二维码/手动输入均需匹配；中继模式 room 全局唯一 |
 | 断网消息丢失 | 消息 seq 序号 + 客户端本地缓存 + 重连后同步 |
 | 中继服务器被入侵 | 业务层端到端加密，中继只看到密文；room/key 可定期轮换 |
@@ -1235,7 +1238,7 @@ wss.on('connection', (ws, req) => {
 | 任务 | 优先级 | 说明 |
 |------|--------|------|
 | Tauri 项目初始化 + UI | P0 | 聊天界面、设置面板（含连接模式开关）、菜单栏常驻 |
-| DeepSeek API 接入 | P0 | 流式对话、多轮上下文、手表模式摘要生成 |
+| AI 服务接入（通用 OpenAI 兼容） | P0 | 流式对话、多轮上下文、手表模式摘要生成；支持任意 base_url + model 组合 |
 | WebSocket 服务器实现 (LanTransport) | P0 | 监听端口、连接管理（心跳/超时）、消息路由 |
 | Transport trait 定义 | P0 | 抽象接口，LanTransport 实现 |
 | 会话存储 | P0 | SQLite 保存历史和配置 |
@@ -1298,7 +1301,7 @@ wss.on('connection', (ws, req) => {
 | 局域网 IP 变化 | 手机无法连接电脑 | Bonjour 自动发现 + 二维码配对 + 手动输入备选 |
 | 电脑休眠/关机 | 服务不可用 | 菜单栏常驻提示状态；支持局域网唤醒 (WOL)（进阶） |
 | iOS 后台断连 | 消息丢失/延迟 | 心跳 + 断线重连 + 指数退避 + App 前台立即重连 |
-| DeepSeek API 限流 | AI 响应失败 | 实现重试 + 友好错误提示 |
+| AI API 限流或不可用 | AI 响应失败 | 实现重试 + 友好错误提示；通用 OpenAI 协议下用户可随时切换 base_url + model，不绑死单一 provider |
 | watchOS 性能不足 | AI 形象动画卡顿 | 使用 Metal 渲染降级；动画帧率自适应 |
 | 应用商店审核 | 手表 App 上架延迟 | 先通过 TestFlight 内测；准备审核说明 |
 | 外网访问需求 | 用户抱怨"出门连不上" | Phase 4 实现 RelayTransport，架构已预留接口，用户自备 VPS 即可 |

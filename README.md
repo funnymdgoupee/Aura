@@ -14,7 +14,7 @@
 | 连接管理器 | ✅ 设备注册、心跳检测、超时清理、广播 |
 | 二维码配对 | ✅ 生成 `aura://pair?mode=lan&...` / `mode=relay&...` |
 | SQLite 存储 | ✅ schema + config CRUD（sessions/messages 等待 Phase 1） |
-| AI 客户端 | ⏳ 骨架（Phase 1 接入 DeepSeek 流式 API） |
+| AI 客户端 | ⏳ 通用 OpenAI 兼容客户端已写（流式 SSE + 非流式），Phase 1 接入路由器 |
 | 菜单栏常驻 | ✅ Tauri 2 TrayIcon，关闭窗口改为隐藏 |
 | React 前端 | ✅ 设置面板、连接模式开关、二维码预览、调试广播 |
 | iOS App | ⏳ PairingInfo + Transport + WebSocketManager + 扫码 + App 入口，待 Mac 上 Xcode 集成 |
@@ -49,7 +49,7 @@ F:\Aura\
 │       ├── commands.rs                   # 暴露给前端的 Tauri 命令
 │       ├── pairing.rs                    # 二维码生成
 │       ├── tray.rs                       # 菜单栏常驻
-│       ├── ai/mod.rs                     # DeepSeek 客户端（骨架）
+│       ├── ai/mod.rs                     # 通用 OpenAI 兼容 AI 客户端（流式 SSE + 非流式 + watch 模式 summary）
 │       ├── db/mod.rs                     # SQLite 存储
 │       ├── network/
 │       │   ├── mod.rs                    # Transport trait + TransportHandle
@@ -128,7 +128,7 @@ npm run dev
 
 按 V2.1 文档第八节路线图：
 
-- [ ] DeepSeek API 流式调用（`ai/mod.rs` 替换 stub）
+- [ ] AI 调用接入路由器（`ai/mod.rs` 已写完流式 + 非流式，待 router 调用）
 - [ ] 会话管理（`session/` 模块，CRUD + 多轮上下文）
 - [ ] 手表模式摘要生成（system prompt + JSON 解析）
 - [ ] 消息路由器接入真实 AI 客户端（替换 `server/router.rs` 的 echo）

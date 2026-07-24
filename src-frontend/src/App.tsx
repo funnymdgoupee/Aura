@@ -4,13 +4,34 @@ import { invoke } from "@tauri-apps/api/core";
 type ConnectionMode = "lan" | "relay";
 
 interface AppConfig {
-  deepseek_api_key: string;
+  ai_base_url: string;
+  ai_api_key: string;
+  ai_model: string;
   server_port: number;
   connection_mode: ConnectionMode;
   relay_server_url: string;
   relay_room_id: string;
   relay_secret_key: string;
 }
+
+interface ProviderPreset {
+  label: string;
+  base_url: string;
+  model: string;
+  doc_url?: string;
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  { label: "DeepSeek", base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { label: "OpenAI", base_url: "https://api.openai.com/v1", model: "gpt-4o" },
+  { label: "Claude (兼容代理)", base_url: "https://api.anthropic.com/v1/openai", model: "claude-sonnet-4-6" },
+  { label: "Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash" },
+  { label: "智谱 GLM", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.6" },
+  { label: "通义 Qwen", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3-coder-plus" },
+  { label: "Kimi", base_url: "https://api.moonshot.cn/v1", model: "kimi-k2" },
+  { label: "豆包", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-1-5-pro" },
+  { label: "Ollama (本地)", base_url: "http://localhost:11434/v1", model: "qwen2.5" },
+];
 
 interface StatusResponse {
   mode: string;
@@ -206,18 +227,70 @@ export default function App() {
             </>
           )}
 
-          <h2 className="section-title" style={{ marginTop: 20 }}>DeepSeek API</h2>
+          <h2 className="section-title" style={{ marginTop: 20 }}>AI 服务配置</h2>
+          <p style={{ fontSize: 11, color: "#8e8e93", marginTop: 0 }}>
+            兼容 OpenAI 协议的任意服务 — 下方有常用 provider 快捷填入
+          </p>
+
+          <div className="field">
+            <label>Base URL</label>
+            <input
+              type="text"
+              placeholder="https://api.deepseek.com/v1"
+              value={config.ai_base_url}
+              onChange={(e) =>
+                setConfig({ ...config, ai_base_url: e.target.value })
+              }
+            />
+          </div>
+
           <div className="field">
             <label>API Key</label>
             <input
               type="password"
               placeholder="sk-xxx"
-              value={config.deepseek_api_key}
+              value={config.ai_api_key}
               onChange={(e) =>
-                setConfig({ ...config, deepseek_api_key: e.target.value })
+                setConfig({ ...config, ai_api_key: e.target.value })
               }
             />
           </div>
+
+          <div className="field">
+            <label>Model</label>
+            <input
+              type="text"
+              placeholder="deepseek-chat / gpt-4o / glm-4.6 / ..."
+              value={config.ai_model}
+              onChange={(e) =>
+                setConfig({ ...config, ai_model: e.target.value })
+              }
+            />
+          </div>
+
+          <details style={{ marginBottom: 14 }}>
+            <summary style={{ fontSize: 11, color: "#8e8e93", cursor: "pointer" }}>
+              快捷填入常用 Provider
+            </summary>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
+              {PROVIDER_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  className="btn secondary"
+                  style={{ fontSize: 11, padding: "6px 8px" }}
+                  onClick={() =>
+                    setConfig({
+                      ...config,
+                      ai_base_url: p.base_url,
+                      ai_model: p.model,
+                    })
+                  }
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </details>
 
           <button className="btn secondary" onClick={handleSaveConfig} style={{ width: "100%" }}>
             保存配置

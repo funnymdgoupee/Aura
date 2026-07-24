@@ -3,9 +3,20 @@ use tauri::{AppHandle, Manager};
 
 const DEFAULT_PORT: u16 = 8765;
 
+/// 默认 base_url 指向 DeepSeek 官方接口（兼容 OpenAI 协议）
+/// 用户可在前端改成任意 OpenAI 兼容服务
+const DEFAULT_AI_BASE_URL: &str = "https://api.deepseek.com/v1";
+const DEFAULT_AI_MODEL: &str = "deepseek-chat";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    pub deepseek_api_key: String,
+    /// OpenAI 兼容 API 的 base_url
+    /// 例：https://api.deepseek.com/v1 / https://api.openai.com/v1
+    ///     https://open.bigmodel.cn/api/paas/v4 / https://api.moonshot.cn/v1
+    pub ai_base_url: String,
+    pub ai_api_key: String,
+    /// 模型名，例：deepseek-chat / gpt-4o / glm-4.6 / kimi-k2
+    pub ai_model: String,
     pub server_port: u16,
     pub connection_mode: ConnectionMode,
     pub relay_server_url: String,
@@ -23,7 +34,9 @@ pub enum ConnectionMode {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            deepseek_api_key: String::new(),
+            ai_base_url: DEFAULT_AI_BASE_URL.to_string(),
+            ai_api_key: String::new(),
+            ai_model: DEFAULT_AI_MODEL.to_string(),
             server_port: DEFAULT_PORT,
             connection_mode: ConnectionMode::Lan,
             relay_server_url: String::new(),
@@ -44,7 +57,9 @@ impl AppConfig {
         if let Ok(rows) = db.list_config().await {
             for (k, v) in rows {
                 match k.as_str() {
-                    "deepseek_api_key" => cfg.deepseek_api_key = v,
+                    "ai_base_url" => cfg.ai_base_url = v,
+                    "ai_api_key" => cfg.ai_api_key = v,
+                    "ai_model" => cfg.ai_model = v,
                     "server_port" => cfg.server_port = v.parse().unwrap_or(DEFAULT_PORT),
                     "connection_mode" => {
                         cfg.connection_mode = match v.as_str() {
@@ -67,7 +82,9 @@ impl AppConfig {
         let Some(db) = db else {
             return Ok(());
         };
-        db.upsert_config("deepseek_api_key", &self.deepseek_api_key).await?;
+        db.upsert_config("ai_base_url", &self.ai_base_url).await?;
+        db.upsert_config("ai_api_key", &self.ai_api_key).await?;
+        db.upsert_config("ai_model", &self.ai_model).await?;
         db.upsert_config("server_port", &self.server_port.to_string()).await?;
         db.upsert_config(
             "connection_mode",
