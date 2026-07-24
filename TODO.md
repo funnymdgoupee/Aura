@@ -5,14 +5,14 @@
 ### 配置本 repo 的 git 署名（不污染全局）
 
 当前全局 git 配置用的是本名 + 工作邮箱：
-- `user.name = 刘春巍`
-- `user.email = liuchunwei@wanfangdata.com.cn`
+- `user.name = `
+- `user.email = `
 
 Aura 这个 repo 不应该用真实身份，改成 GitHub noreply 邮箱：
 
 ```bash
 cd /path/to/Aura
-git config user.name "funnymdgoupee"
+git config user.name "Lisolia"
 git config user.email "71111266+funnymdgoupee@users.noreply.github.com"
 ```
 
@@ -20,7 +20,7 @@ git config user.email "71111266+funnymdgoupee@users.noreply.github.com"
 
 ### 历史回溯（可选）
 
-当前 4 条 commit（`b89a4f8` `40ffd08` `540bc79` `ee3f6f4`）已 push，作者还是"刘春巍"。要擦干净需要 `git filter-repo` 重写 + force push：
+当前 4 条 commit（`b89a4f8` `40ffd08` `540bc79` `ee3f6f4`）已 push，作者还是"本名"。要擦干净需要 `git filter-repo` 重写 + force push：
 
 ```bash
 pip install git-filter-repo
