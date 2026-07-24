@@ -82,9 +82,37 @@ final class SessionManager: ObservableObject {
         let payload = server.payload
         let content = payload?.content ?? ""
         let summary = payload?.summary
-        let isError = payload?.status == .error || server.from == .system
+        let status = payload?.status
 
-        // 如果列表最后一条是 thinking，替换它；否则追加
+        if status == .streaming {
+            // 增量追加到上一条 AI 流式消息
+            if let last = messages.last, last.role == .ai, last.isStreaming {
+                messages[messages.count - 1].text += content
+            } else {
+                // 移除 thinking 占位
+                if let last = messages.last, last.thinking {
+                    messages.removeLast()
+                }
+                messages.append(.aiStreaming(content))
+            }
+            return
+        }
+
+        if status == .done {
+            // 替换上一条流式 AI 消息为最终内容
+            if let last = messages.last, last.role == .ai, last.isStreaming {
+                messages[messages.count - 1] = .ai(text: content, summary: summary, isError: false)
+            } else {
+                if let last = messages.last, last.thinking {
+                    messages.removeLast()
+                }
+                messages.append(.ai(text: content, summary: summary, isError: false))
+            }
+            return
+        }
+
+        // error 或其他 — 系统消息
+        let isError = status == .error || server.from == .system
         if let last = messages.last, last.thinking {
             messages[messages.count - 1] = .ai(text: content, summary: summary, isError: isError)
         } else {

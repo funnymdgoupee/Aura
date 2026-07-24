@@ -124,6 +124,9 @@ struct ChatView: View {
 /// 单条消息气泡
 struct MessageBubble: View {
     let message: ChatMessage
+    @State private var cursorVisible = true
+
+    private let cursorTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack {
@@ -174,7 +177,7 @@ struct MessageBubble: View {
                 .background(Color.red.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         } else {
-            // AI
+            // AI — 流式时在末尾加闪烁光标
             VStack(alignment: .leading, spacing: 6) {
                 if let summary = message.summary, !summary.isEmpty {
                     Text(summary)
@@ -183,12 +186,25 @@ struct MessageBubble: View {
                         .padding(.bottom, 4)
                         .overlay(Divider(), alignment: .bottom)
                 }
-                Text(message.text)
+                HStack(spacing: 1) {
+                    Text(message.text)
+                    if message.isStreaming {
+                        Rectangle()
+                            .fill(Color.primary)
+                            .frame(width: 2, height: 14)
+                            .opacity(cursorVisible ? 1 : 0)
+                            .animation(.easeInOut(duration: 0.15), value: cursorVisible)
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .onReceive(cursorTimer) { _ in
+                guard message.isStreaming else { return }
+                cursorVisible.toggle()
+            }
         }
     }
 }

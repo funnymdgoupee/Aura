@@ -7,6 +7,7 @@ struct ChatMessage: Identifiable, Equatable {
     var text: String
     var summary: String?
     var thinking: Bool
+    var isStreaming: Bool
     var error: Bool
     let timestamp: Date
 
@@ -27,6 +28,7 @@ struct ChatMessage: Identifiable, Equatable {
             text: text,
             summary: nil,
             thinking: false,
+            isStreaming: false,
             error: false,
             timestamp: Date()
         )
@@ -39,6 +41,20 @@ struct ChatMessage: Identifiable, Equatable {
             text: "",
             summary: nil,
             thinking: true,
+            isStreaming: false,
+            error: false,
+            timestamp: Date()
+        )
+    }
+
+    static func aiStreaming(_ initialText: String) -> ChatMessage {
+        ChatMessage(
+            id: UUID(),
+            role: .ai,
+            text: initialText,
+            summary: nil,
+            thinking: false,
+            isStreaming: true,
             error: false,
             timestamp: Date()
         )
@@ -51,6 +67,7 @@ struct ChatMessage: Identifiable, Equatable {
             text: text,
             summary: summary,
             thinking: false,
+            isStreaming: false,
             error: isError,
             timestamp: Date()
         )
@@ -63,6 +80,7 @@ struct ChatMessage: Identifiable, Equatable {
             text: text,
             summary: nil,
             thinking: false,
+            isStreaming: false,
             error: true,
             timestamp: Date()
         )

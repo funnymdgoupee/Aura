@@ -544,6 +544,21 @@ code, pre {
   50% { opacity: 1; }
 }
 
+.streaming-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--text-primary);
+  animation: cursorBlink 1s steps(2, end) infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
 .msg-content {
   word-break: break-word;
 }

@@ -8,8 +8,9 @@
 //!   - outgoing_tx：广播给所有已连接 WS 客户端
 //!   - app_handle.emit(...)：推送给 Mac 前端
 //!
-//! Phase 1.0：非流式，等 AI 完整响应后广播一次
-//! Phase 1.1：改 chat_stream，每收到 chunk 广播一次
+//! Phase 1.1：流式调用 AI，每个 token chunk 广播 + emit，最后发 Done 事件
+//!   - watch_target=false 时广播 chunk（Mac / iPhone 用户能看打字机效果）
+//!   - watch_target=true 时不广播 chunk，仅发最终 Done（手表屏小不展示中间态）
 
 use std::sync::Arc;
 
@@ -113,10 +114,42 @@ async fn process_message(
         watch_target,
     };
 
-    // 4. 调用 AI
-    match ai_client.chat(req).await {
+    // 4. 流式调用 AI
+    //    watch_target = true 时不广播 chunk（手表端只接收最终结果）
+    //    watch_target = false 时每个 chunk 都广播 + emit 给前端和 iPhone
+    let session_id_for_chunk = session_id.clone();
+    let outgoing_for_chunk = outgoing_tx.clone();
+    let app_for_chunk = app_handle.clone();
+    let broadcast_chunks = !watch_target;
+
+    let stream_result = ai_client
+        .chat_stream(req, move |delta: &str| {
+            if !broadcast_chunks {
+                return;
+            }
+            let chunk = ServerToClient::Message {
+                session_id: session_id_for_chunk.clone(),
+                seq: next_seq(),
+                from: MessageFrom::Ai,
+                payload: ServerPayload {
+                    content: Some(delta.to_string()),
+                    summary: None,
+                    status: Some(AiStatus::Streaming),
+                    error: None,
+                },
+                timestamp: timestamp_now(),
+            };
+            let _ = outgoing_for_chunk.send(OutgoingMsg {
+                target: None,
+                message: chunk.clone(),
+            });
+            let _ = app_for_chunk.emit("ai_message", &chunk);
+        })
+        .await;
+
+    match stream_result {
         Ok(resp) => {
-            // 把 AI 回复追加到历史
+            // 把 AI 回复追加到历史（持久化到 Markdown 文件）
             sessions
                 .append(
                     &session_id,
@@ -127,7 +160,7 @@ async fn process_message(
                 )
                 .await;
 
-            let reply = ServerToClient::Message {
+            let final_msg = ServerToClient::Message {
                 session_id: session_id.clone(),
                 seq: next_seq(),
                 from: MessageFrom::Ai,
@@ -139,17 +172,14 @@ async fn process_message(
                 },
                 timestamp: timestamp_now(),
             };
-
-            // 广播给 WS
             let _ = outgoing_tx.send(OutgoingMsg {
                 target: None,
-                message: reply.clone(),
+                message: final_msg.clone(),
             });
-            // 推送给前端
-            let _ = app_handle.emit("ai_message", &reply);
+            let _ = app_handle.emit("ai_message", &final_msg);
 
             log::info!(
-                "AI 回复 session={} device={} bytes={}",
+                "AI 回复完成 session={} device={} bytes={}",
                 session_id,
                 device_id,
                 resp.content.len()
@@ -158,18 +188,24 @@ async fn process_message(
         Err(e) => {
             log::error!("AI 调用失败: {}", e);
 
-            let err_msg = ServerToClient::Error {
+            let err_payload = ServerPayload {
+                content: Some(e.to_string()),
+                summary: None,
+                status: Some(AiStatus::Error),
+                error: Some(e.to_string()),
+            };
+            let err_msg = ServerToClient::Message {
                 session_id: session_id.clone(),
-                code: "ai_error".into(),
-                message: e.to_string(),
+                seq: next_seq(),
+                from: MessageFrom::Ai,
+                payload: err_payload,
                 timestamp: timestamp_now(),
             };
-
             let _ = outgoing_tx.send(OutgoingMsg {
                 target: None,
                 message: err_msg.clone(),
             });
-            let _ = app_handle.emit("ai_error", &err_msg);
+            let _ = app_handle.emit("ai_message", &err_msg);
         }
     }
 }

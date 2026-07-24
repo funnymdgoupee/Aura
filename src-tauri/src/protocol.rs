@@ -124,6 +124,7 @@ pub struct ServerPayload {
 pub enum AiStatus {
     Thinking,
     Executing,
+    Streaming,
     Done,
     Error,
 }

@@ -55,6 +55,7 @@ interface ChatMessage {
   text: string;
   summary?: string;
   thinking?: boolean;
+  streaming?: boolean;
   error?: boolean;
 }
 
@@ -166,17 +167,67 @@ export default function App() {
 
     listen<AiMessageEvent>("ai_message", (e) => {
       const p = e.payload.payload;
+      const status = p.status;
       setMessages((m) => {
-        const withoutThinking = m.filter((_, idx) =>
+        // 移除末尾 thinking 占位
+        const base = m.filter((_, idx) =>
           !(m[idx].thinking && idx === m.length - 1)
         );
+
+        if (status === "streaming") {
+          // 增量追加到上一条 AI 流式消息
+          const last = base[base.length - 1];
+          if (last && last.role === "ai" && last.streaming) {
+            const updated = [...base];
+            updated[updated.length - 1] = {
+              ...last,
+              text: last.text + (p.content ?? ""),
+            };
+            return updated;
+          }
+          // 否则新建流式 AI 消息
+          return [
+            ...base,
+            {
+              role: "ai" as const,
+              text: p.content ?? "",
+              streaming: true,
+            },
+          ];
+        }
+
+        if (status === "done") {
+          // 替换上一条流式 AI 消息为最终内容
+          const last = base[base.length - 1];
+          if (last && last.role === "ai" && last.streaming) {
+            const updated = [...base];
+            updated[updated.length - 1] = {
+              role: "ai" as const,
+              text: p.content ?? "",
+              summary: p.summary,
+              streaming: false,
+            };
+            return updated;
+          }
+          // 否则直接追加
+          return [
+            ...base,
+            {
+              role: "ai" as const,
+              text: p.content ?? "",
+              summary: p.summary,
+            },
+          ];
+        }
+
+        // error 或其他状态 — 当作系统消息
         return [
-          ...withoutThinking,
+          ...base,
           {
-            role: p.status === "error" ? "system" : "ai",
+            role: status === "error" ? ("system" as const) : ("ai" as const),
             text: p.content ?? "",
             summary: p.summary,
-            error: p.status === "error",
+            error: status === "error",
           },
         ];
       });
@@ -451,7 +502,7 @@ export default function App() {
                     if (m.thinking) {
                       return <div key={i} className="msg thinking" />;
                     }
-                    const cls = `msg ${m.role === "user" ? "user" : m.role === "system" ? "system" : "ai"}${m.error ? " error" : ""}`;
+                    const cls = `msg ${m.role === "user" ? "user" : m.role === "system" ? "system" : "ai"}${m.error ? " error" : ""}${m.streaming ? " streaming" : ""}`;
                     return (
                       <div key={i} className={cls}>
                         {m.role === "ai" && m.summary && (
@@ -466,6 +517,7 @@ export default function App() {
                             m.text
                           )}
                         </div>
+                        {m.streaming && <span className="streaming-cursor" />}
                       </div>
                     );
                   })}

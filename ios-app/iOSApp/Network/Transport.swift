@@ -21,7 +21,7 @@ enum TransportStatus: Equatable {
 /// 桌面端发来的消息（与 src-tauri/src/protocol.rs ServerToClient 一致）
 struct ServerMessage: Codable {
     enum FromType: String, Codable { case ai, system }
-    enum AiStatus: String, Codable { case thinking, executing, done, error }
+    enum AiStatus: String, Codable { case thinking, executing, streaming, done, error }
 
     // 简化：仅解析 Phase 0 所需字段
     let type: String
