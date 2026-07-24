@@ -6,6 +6,7 @@ pub mod network;
 pub mod pairing;
 pub mod protocol;
 pub mod server;
+pub mod session;
 pub mod tray;
 
 use std::sync::Arc;
@@ -15,11 +16,16 @@ use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
 use crate::db::Db;
+use crate::protocol::ClientToServer;
+use crate::session::SessionStore;
 
 /// 全局应用状态，由 Tauri 管理
 pub struct AppState {
     pub config: Arc<Mutex<AppConfig>>,
     pub transport: Arc<Mutex<Option<crate::network::TransportHandle>>>,
+    /// Mac 前端 → router 的消息通道；router 启动时填入，停止时清空
+    pub local_tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<ClientToServer>>>>,
+    pub sessions: SessionStore,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point))]
@@ -35,7 +41,6 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // 初始化数据库 + 加载配置 + 注入 state
             tauri::async_runtime::block_on(async move {
                 let db_dir = handle
                     .path()
@@ -57,14 +62,14 @@ pub fn run() {
                 let state = AppState {
                     config: Arc::new(Mutex::new(config)),
                     transport: Arc::new(Mutex::new(None)),
+                    local_tx: Arc::new(Mutex::new(None)),
+                    sessions: SessionStore::new(),
                 };
                 let _ = handle.manage(state);
                 let _ = handle.manage(db);
             });
 
-            // 菜单栏常驻
             let _ = tray::build_tray(app.handle());
-
             Ok(())
         })
         .on_window_event(tray::on_window_event)
@@ -77,6 +82,9 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             commands::send_test_message,
+            commands::send_message,
+            commands::list_sessions,
+            commands::clear_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

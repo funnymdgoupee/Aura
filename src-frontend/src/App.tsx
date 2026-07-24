@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 type ConnectionMode = "lan" | "relay";
 
@@ -47,8 +48,37 @@ interface PairingResult {
 }
 
 interface ChatMessage {
-  role: "user" | "ai";
+  role: "user" | "ai" | "system";
   text: string;
+  summary?: string;
+  thinking?: boolean;
+  error?: boolean;
+}
+
+interface AiStatusEvent {
+  session_id: string;
+  status: "thinking" | "executing" | "done" | "error";
+  error?: string;
+}
+
+interface AiMessageEvent {
+  session_id: string;
+  seq: number;
+  from: "ai" | "system";
+  payload: {
+    content?: string;
+    summary?: string;
+    status?: "thinking" | "executing" | "done" | "error";
+    error?: string;
+  };
+  timestamp: number;
+}
+
+interface AiErrorEvent {
+  session_id: string;
+  code: string;
+  message: string;
+  timestamp: number;
 }
 
 export default function App() {
@@ -82,6 +112,55 @@ export default function App() {
     const timer = setInterval(refreshStatus, 3000);
     return () => clearInterval(timer);
   }, [refreshConfig, refreshStatus]);
+
+  // 监听 router 发来的 AI 消息 / 状态 / 错误
+  useEffect(() => {
+    let unlistenMsg: UnlistenFn | undefined;
+    let unlistenStatus: UnlistenFn | undefined;
+    let unlistenErr: UnlistenFn | undefined;
+
+    listen<AiMessageEvent>("ai_message", (e) => {
+      const p = e.payload.payload;
+      setMessages((m) => {
+        // 移除最后一个 thinking 占位
+        const withoutThinking = m.filter((_, idx) =>
+          !(m[idx].thinking && idx === m.length - 1)
+        );
+        return [
+          ...withoutThinking,
+          {
+            role: p.status === "error" ? "system" : "ai",
+            text: p.content ?? "",
+            summary: p.summary,
+            error: p.status === "error",
+          },
+        ];
+      });
+    }).then((f) => (unlistenMsg = f));
+
+    listen<AiStatusEvent>("ai_status", (e) => {
+      if (e.payload.status === "thinking") {
+        setMessages((m) => {
+          // 已有 thinking 占位就不重复加
+          if (m.length > 0 && m[m.length - 1].thinking) return m;
+          return [...m, { role: "ai", text: "", thinking: true }];
+        });
+      }
+    }).then((f) => (unlistenStatus = f));
+
+    listen<AiErrorEvent>("ai_error", (e) => {
+      setMessages((m) => [
+        ...m,
+        { role: "system", text: `AI 错误：${e.payload.message}`, error: true },
+      ]);
+    }).then((f) => (unlistenErr = f));
+
+    return () => {
+      unlistenMsg?.();
+      unlistenStatus?.();
+      unlistenErr?.();
+    };
+  }, []);
 
   const handleStart = async () => {
     try {
@@ -136,10 +215,13 @@ export default function App() {
     setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
     try {
-      await invoke("send_test_message", { text });
-      setMessages((m) => [...m, { role: "ai", text: `[echo] ${text}` }]);
+      await invoke("send_message", { text, sessionId: null });
+      // 响应通过 ai_message / ai_status / ai_error 事件回传
     } catch (e) {
-      setMessages((m) => [...m, { role: "ai", text: `发送失败: ${e}` }]);
+      setMessages((m) => [
+        ...m,
+        { role: "system", text: `发送失败：${e}`, error: true },
+      ]);
     }
   };
 
@@ -310,11 +392,27 @@ export default function App() {
         <main className="chat">
           {messages.length === 0 && (
             <div style={{ color: "#8e8e93", fontSize: 13, textAlign: "center", marginTop: 40 }}>
-              启动服务后，用手机扫码连接，或在下方输入测试消息广播给已连接的设备。
+              启动服务后，在下方输入消息，AI 回复会实时显示在这里，同时广播给已连接的设备。
             </div>
           )}
           {messages.map((m, i) => (
-            <div key={i} className={`msg ${m.role}`}>{m.text}</div>
+            <div
+              key={i}
+              className={`msg ${m.role === "user" ? "user" : m.role === "system" ? "system" : "ai"}${m.error ? " error" : ""}`}
+            >
+              {m.thinking ? (
+                <em style={{ opacity: 0.6 }}>思考中...</em>
+              ) : (
+                <>
+                  {m.summary && (
+                    <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+                      {m.summary}
+                    </div>
+                  )}
+                  {m.text}
+                </>
+              )}
+            </div>
           ))}
         </main>
       </div>
@@ -322,7 +420,7 @@ export default function App() {
       <div className="composer">
         <input
           type="text"
-          placeholder="输入测试消息（广播给所有已连接设备）"
+          placeholder="输入消息，回车发送给 AI"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
