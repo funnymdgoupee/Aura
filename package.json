@@ -1,0 +1,17 @@
+{
+  "name": "aura-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "跨平台通用 AI 助手 — 以 Mac 为中心，Apple 设备原生互联",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "frontend:dev": "vite --config src-frontend/vite.config.ts",
+    "frontend:build": "vite build --config src-frontend/vite.config.ts",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "typescript": "^5.4.0"
+  }
+}

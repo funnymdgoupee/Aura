@@ -1,0 +1,176 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  color-scheme: light dark;
+  background: #ffffff;
+  color: #1c1c1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #1c1c1e;
+    color: #f5f5f7;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+.header {
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.status {
+  font-size: 12px;
+  color: #8e8e93;
+}
+
+.status.running {
+  color: #34c759;
+}
+
+.status.error {
+  color: #ff3b30;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  overflow: hidden;
+}
+
+.sidebar {
+  border-right: 1px solid rgba(128, 128, 128, 0.2);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.chat {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn {
+  background: #007aff;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #0051d5;
+}
+
+.btn.danger {
+  background: #ff3b30;
+}
+
+.btn.secondary {
+  background: rgba(128, 128, 128, 0.2);
+  color: inherit;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.field label {
+  font-size: 12px;
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.field input,
+.field select {
+  padding: 8px 10px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #8e8e93;
+  margin: 0 0 8px;
+  letter-spacing: 0.5px;
+}
+
+.qr-preview {
+  width: 100%;
+  aspect-ratio: 1;
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.msg {
+  padding: 8px 12px;
+  border-radius: 12px;
+  max-width: 70%;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.msg.user {
+  background: #007aff;
+  color: white;
+  align-self: flex-end;
+}
+
+.msg.ai {
+  background: rgba(128, 128, 128, 0.15);
+  align-self: flex-start;
+}
+
+.composer {
+  border-top: 1px solid rgba(128, 128, 128, 0.2);
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.composer input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
